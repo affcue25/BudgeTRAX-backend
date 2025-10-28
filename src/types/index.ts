@@ -84,6 +84,7 @@ export interface Transaction {
 
 export interface CreateTransactionRequest {
   category_id: string;
+  category_name?: string;
   amount: number;
   description: string;
   date: string;
