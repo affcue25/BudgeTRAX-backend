@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { supabase } from '../config/database';
+import { supabaseAdmin } from '../config/database';
 import { JWTPayload, AuthenticatedRequest } from '../types';
 
 export const authenticateToken = async (
@@ -24,7 +24,7 @@ export const authenticateToken = async (
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
     
     // Get user from database
-    const { data: user, error } = await supabase
+    const { data: user, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('id', decoded.userId)
@@ -70,7 +70,7 @@ export const optionalAuth = async (
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
       
-      const { data: user } = await supabase
+      const { data: user } = await supabaseAdmin
         .from('users')
         .select('*')
         .eq('id', decoded.userId)

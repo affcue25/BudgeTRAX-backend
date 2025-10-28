@@ -24,7 +24,7 @@ export class AuthService {
       const { email, password, name } = userData;
 
       // Check if user already exists
-      const { data: existingUser } = await supabase
+      const { data: existingUser } = await supabaseAdmin
         .from('users')
         .select('id')
         .eq('email', email.toLowerCase())
@@ -38,7 +38,7 @@ export class AuthService {
       const hashedPassword = await bcrypt.hash(password, this.SALT_ROUNDS);
 
       // Create user in database
-      const { data: newUser, error } = await supabase
+      const { data: newUser, error } = await supabaseAdmin
         .from('users')
         .insert({
           email: email.toLowerCase(),
@@ -83,7 +83,7 @@ export class AuthService {
       const { email, password } = loginData;
 
       // Find user by email
-      const { data: user, error } = await supabase
+      const { data: user, error } = await supabaseAdmin
         .from('users')
         .select('*')
         .eq('email', email.toLowerCase())
@@ -127,7 +127,7 @@ export class AuthService {
       const secret = this.validateJWTSecret();
       const decoded = jwt.verify(token, secret) as { userId: string; email: string };
       
-      const { data: user, error } = await supabase
+      const { data: user, error } = await supabaseAdmin
         .from('users')
         .select('*')
         .eq('id', decoded.userId)
@@ -166,7 +166,7 @@ export class AuthService {
   static async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
     try {
       // Get user with password
-      const { data: user, error } = await supabase
+      const { data: user, error } = await supabaseAdmin
         .from('users')
         .select('password')
         .eq('id', userId)
@@ -186,7 +186,7 @@ export class AuthService {
       const hashedNewPassword = await bcrypt.hash(newPassword, this.SALT_ROUNDS);
 
       // Update password
-      const { error: updateError } = await supabase
+      const { error: updateError } = await supabaseAdmin
         .from('users')
         .update({
           password: hashedNewPassword,

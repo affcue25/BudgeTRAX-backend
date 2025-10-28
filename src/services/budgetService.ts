@@ -10,7 +10,7 @@ export class BudgetService {
     try {
       const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
       
-      const { data: goal, error } = await supabase
+      const { data: goal, error } = await supabaseAdmin
         .from('monthly_goals')
         .select('*')
         .eq('user_id', userId)
@@ -36,7 +36,7 @@ export class BudgetService {
    */
   static async createMonthlyGoal(userId: string, goalData: CreateMonthlyGoalRequest): Promise<MonthlyGoal> {
     try {
-      const { data: goal, error } = await supabase
+      const { data: goal, error } = await supabaseAdmin
         .from('monthly_goals')
         .upsert({
           user_id: userId,
@@ -71,7 +71,7 @@ export class BudgetService {
     try {
       const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
       
-      const { data: transactions, error } = await supabase
+      const { data: transactions, error } = await supabaseAdmin
         .from('transactions')
         .select('*')
         .eq('user_id', userId)
@@ -99,7 +99,7 @@ export class BudgetService {
     try {
       const month = new Date(transactionData.date).toISOString().slice(0, 7); // YYYY-MM format
       
-      const { data: transaction, error } = await supabase
+      const { data: transaction, error } = await supabaseAdmin
         .from('transactions')
         .insert({
           user_id: userId,
@@ -200,7 +200,7 @@ export class BudgetService {
    */
   static async getMonthlyHistory(userId: string): Promise<any[]> {
     try {
-      const { data: history, error } = await supabase
+      const { data: history, error } = await supabaseAdmin
         .from('monthly_history')
         .select('*')
         .eq('user_id', userId)
@@ -225,7 +225,7 @@ export class BudgetService {
    */
   static async getUserCategories(userId: string): Promise<any[]> {
     try {
-      const { data: categories, error } = await supabase
+      const { data: categories, error } = await supabaseAdmin
         .from('categories')
         .select('*')
         .or(`user_id.eq.${userId},is_default.eq.true`)
@@ -255,7 +255,7 @@ export class BudgetService {
     icon: string;
   }): Promise<any> {
     try {
-      const { data: category, error } = await supabase
+      const { data: category, error } = await supabaseAdmin
         .from('categories')
         .insert({
           user_id: userId,
@@ -286,7 +286,7 @@ export class BudgetService {
    */
   static async deleteCategory(userId: string, categoryId: string): Promise<void> {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('categories')
         .delete()
         .eq('id', categoryId)
