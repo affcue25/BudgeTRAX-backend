@@ -17,54 +17,63 @@ export class AuthService {
   }
 
   /**
-   * Sign up a new user
+   * Sign up a new user using Supabase Auth and return Supabase access token
    */
   static async signup(userData: CreateUserRequest): Promise<AuthResponse> {
     try {
       const { email, password, name } = userData;
 
-      // Check if user already exists
-      const { data: existingUser } = await supabaseAdmin
-        .from('users')
-        .select('id')
-        .eq('email', email.toLowerCase())
-        .single();
+      // Create Supabase Auth user (server-side, confirmed immediately)
+      const { data: createdUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+        email: email.toLowerCase(),
+        password,
+        email_confirm: true,
+        user_metadata: { name: name.trim() },
+      });
 
-      if (existingUser) {
-        throw createError('User with this email already exists', 409);
+      if (createUserError || !createdUser?.user) {
+        throw createError(createUserError?.message || 'Failed to create auth user', 500);
       }
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, this.SALT_ROUNDS);
+      const authUser = createdUser.user;
 
-      // Create user in database
-      const { data: newUser, error } = await supabaseAdmin
+      // Ensure a corresponding row exists in our users table, keyed by auth user id
+      const { data: dbUser, error: upsertError } = await supabaseAdmin
         .from('users')
-        .insert({
-          email: email.toLowerCase(),
-          password: hashedPassword,
+        .upsert({
+          id: authUser.id,
+          email: authUser.email?.toLowerCase(),
+          // The application no longer uses this column for auth; keep non-null to satisfy schema
+          password: '',
           name: name.trim(),
           is_active: true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' })
         .select()
         .single();
 
-      if (error) {
-        console.error('Database error during signup:', error);
-        throw createError('Failed to create user', 500);
+      if (upsertError || !dbUser) {
+        throw createError('Failed to create application user', 500);
       }
 
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = newUser;
+      // Sign in to get a Supabase session access token
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase(),
+        password,
+      });
 
-      // Generate JWT token
-      const token = this.generateToken(newUser.id, newUser.email);
+      if (signInError || !signInData?.session?.access_token) {
+        throw createError('Failed to sign in after signup', 500);
+      }
+
+      const token = signInData.session.access_token;
+
+      const { password: _pw, ...userWithoutPassword } = dbUser;
 
       return {
         user: userWithoutPassword as User,
-        token
+        token,
       };
     } catch (error) {
       if (error instanceof Error && 'statusCode' in error) {
@@ -82,33 +91,36 @@ export class AuthService {
     try {
       const { email, password } = loginData;
 
-      // Find user by email
-      const { data: user, error } = await supabaseAdmin
+      // Authenticate via Supabase Auth to get access token
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase(),
+        password,
+      });
+
+      if (signInError || !signInData?.session?.access_token || !signInData.user) {
+        throw createError('Invalid email or password', 401);
+      }
+
+      const accessToken = signInData.session.access_token;
+      const authUserId = signInData.user.id;
+
+      // Get corresponding app user row
+      const { data: appUser, error: appUserError } = await supabaseAdmin
         .from('users')
         .select('*')
-        .eq('email', email.toLowerCase())
+        .eq('id', authUserId)
         .eq('is_active', true)
         .single();
 
-      if (error || !user) {
-        throw createError('Invalid email or password', 401);
+      if (appUserError || !appUser) {
+        throw createError('User not found', 404);
       }
 
-      // Verify password
-      const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (!isPasswordValid) {
-        throw createError('Invalid email or password', 401);
-      }
-
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
-
-      // Generate JWT token
-      const token = this.generateToken(user.id, user.email);
+      const { password: _pw, ...userWithoutPassword } = appUser;
 
       return {
         user: userWithoutPassword as User,
-        token
+        token: accessToken,
       };
     } catch (error) {
       if (error instanceof Error && 'statusCode' in error) {
@@ -124,27 +136,31 @@ export class AuthService {
    */
   static async verifyToken(token: string): Promise<User> {
     try {
-      const secret = this.validateJWTSecret();
-      const decoded = jwt.verify(token, secret) as { userId: string; email: string };
-      
-      const { data: user, error } = await supabaseAdmin
+      // Validate using Supabase Auth
+      const { data, error } = await supabase.auth.getUser(token);
+      if (error || !data?.user) {
+        throw createError('Invalid token', 401);
+      }
+
+      const authUserId = data.user.id;
+      const { data: user, error: userError } = await supabaseAdmin
         .from('users')
         .select('*')
-        .eq('id', decoded.userId)
+        .eq('id', authUserId)
         .eq('is_active', true)
         .single();
 
-      if (error || !user) {
-        throw createError('Invalid token', 401);
+      if (userError || !user) {
+        throw createError('User not found', 404);
       }
 
-      const { password: _, ...userWithoutPassword } = user;
+      const { password: _pw, ...userWithoutPassword } = user;
       return userWithoutPassword as User;
     } catch (error) {
-      if (error instanceof jwt.JsonWebTokenError) {
-        throw createError('Invalid token', 401);
+      if (error instanceof Error && 'statusCode' in error) {
+        throw error;
       }
-      throw error;
+      throw error as Error;
     }
   }
 

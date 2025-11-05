@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { supabaseAdmin } from '../config/database';
+import { supabase, supabaseAdmin } from '../config/database';
 import { JWTPayload, AuthenticatedRequest } from '../types';
 
 export const authenticateToken = async (
@@ -20,27 +20,43 @@ export const authenticateToken = async (
       return;
     }
 
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
-    
-    // Get user from database
+    // Prefer Supabase token validation
+    const { data, error: supaError } = await supabase.auth.getUser(token);
+    if (supaError || !data?.user) {
+      // fallback to legacy custom JWT if present
+      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+      const { data: user, error } = await supabaseAdmin
+        .from('users')
+        .select('*')
+        .eq('id', decoded.userId)
+        .eq('is_active', true)
+        .single();
+
+      if (error || !user) {
+        res.status(401).json({ success: false, error: 'Invalid token or user not found' });
+        return;
+      }
+
+      (req as any).user = user;
+      next();
+      return;
+    }
+
+    // Supabase token path
+    const authUserId = data.user.id;
     const { data: user, error } = await supabaseAdmin
       .from('users')
       .select('*')
-      .eq('id', decoded.userId)
+      .eq('id', authUserId)
       .eq('is_active', true)
       .single();
 
     if (error || !user) {
-      res.status(401).json({
-        success: false,
-        error: 'Invalid token or user not found'
-      });
+      res.status(401).json({ success: false, error: 'Invalid token or user not found' });
       return;
     }
 
-    // Add user to request object
-    req.user = user;
+    (req as any).user = user;
     next();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
