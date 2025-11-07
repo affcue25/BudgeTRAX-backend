@@ -74,8 +74,17 @@ export const budgetSchemas = {
 
   createTransaction: Joi.object({
     category_id: Joi.string().required(),
+    category_name: Joi.string().optional(),
     amount: Joi.number().positive().required(),
     description: Joi.string().min(1).max(200).required(),
     date: Joi.date().iso().required()
+  }),
+
+  updateTransaction: Joi.object({
+    category_id: Joi.string().optional(),
+    category_name: Joi.string().optional(),
+    amount: Joi.number().positive().optional(),
+    description: Joi.string().min(1).max(200).optional(),
+    date: Joi.date().iso().optional()
   })
 };

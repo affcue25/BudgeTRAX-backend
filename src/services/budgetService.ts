@@ -3,6 +3,69 @@ import { CreateMonthlyGoalRequest, CreateTransactionRequest, MonthlyGoal, Transa
 import { createError } from '../middleware/errorHandler';
 
 export class BudgetService {
+  private static isUuid(value: string | undefined | null): boolean {
+    if (!value) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private static async resolveCategoryId(
+    userId: string,
+    categoryId: string | undefined,
+    categoryName?: string,
+    createIfMissing: boolean = true
+  ): Promise<{ id: string; name: string } | null> {
+    // If valid UUID, try to fetch to ensure it exists and belongs to user or default
+    if (this.isUuid(categoryId || '')) {
+      const { data, error } = await supabaseAdmin
+        .from('categories')
+        .select('id,name')
+        .eq('id', categoryId as string)
+        .or(`user_id.eq.${userId},is_default.eq.true`)
+        .maybeSingle();
+      if (!error && data) return { id: data.id, name: data.name };
+    }
+
+    // Fallback: resolve by name across user's categories or defaults
+    if (categoryName && categoryName.trim().length > 0) {
+      const { data, error } = await supabaseAdmin
+        .from('categories')
+        .select('id,name')
+        .eq('name', categoryName)
+        .or(`user_id.eq.${userId},is_default.eq.true`)
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return { id: data.id, name: data.name };
+    }
+
+    // If still not found and allowed, create a user-scoped category using provided name or a derived name from slug
+    if (createIfMissing) {
+      let derivedName = categoryName;
+      if ((!derivedName || derivedName.trim().length === 0) && categoryId && !this.isUuid(categoryId)) {
+        // Convert slug like "food-groceries" to "Food & Groceries" best-effort: replace '-' with ' ', title case
+        const spaced = categoryId.replace(/-/g, ' ');
+        derivedName = spaced.replace(/\b\w/g, (c) => c.toUpperCase());
+      }
+
+      if (derivedName) {
+        const { data: created, error: createErr } = await supabaseAdmin
+          .from('categories')
+          .insert({
+            user_id: userId,
+            name: derivedName,
+            color: '#6B7280',
+            icon: 'more-horizontal',
+            is_default: false,
+          })
+          .select('id,name')
+          .single();
+
+        if (!createErr && created) {
+          return { id: created.id, name: created.name };
+        }
+      }
+    }
+    return null;
+  }
   /**
    * Get user's monthly goal for current month
    */
@@ -99,12 +162,24 @@ export class BudgetService {
     try {
       const month = new Date(transactionData.date).toISOString().slice(0, 7); // YYYY-MM format
       
+      // Resolve category id to a valid UUID from categories table (supports default slugs)
+      const resolved = await this.resolveCategoryId(
+        userId,
+        transactionData.category_id,
+        transactionData.category_name
+      );
+      console.log('resolved', resolved);
+      console.log('transactionData', transactionData);
+      if (!resolved) {
+        throw createError('Unknown category. Provide a valid category_id or category_name.', 400);
+      }
+
       const { data: transaction, error } = await supabaseAdmin
         .from('transactions')
         .insert({
           user_id: userId,
-          category_id: transactionData.category_id,
-          category_name: transactionData.category_name || 'Unknown',
+          category_id: resolved.id,
+          category_name: resolved.name,
           amount: transactionData.amount,
           description: transactionData.description,
           date: transactionData.date,
@@ -117,13 +192,79 @@ export class BudgetService {
         throw createError('Failed to create transaction', 500);
       }
 
-      return transaction;
+      return transaction as Transaction;
     } catch (error) {
       if (error instanceof Error && 'statusCode' in error) {
         throw error;
       }
       console.error('Create transaction error:', error);
       throw createError('Failed to create transaction', 500);
+    }
+  }
+
+  /**
+   * Update a transaction by id, ensuring it belongs to user. If date changes, update month accordingly.
+   */
+  static async updateTransaction(userId: string, transactionId: string, updates: Partial<CreateTransactionRequest>): Promise<Transaction> {
+    try {
+      // Ensure the transaction belongs to the user
+      const { data: existing, error: findError } = await supabaseAdmin
+        .from('transactions')
+        .select('*')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (findError || !existing) {
+        throw createError('Transaction not found', 404);
+      }
+
+      let month = existing.month as string;
+      let newDate = existing.date as string;
+      if (updates.date) {
+        newDate = updates.date;
+        month = new Date(updates.date).toISOString().slice(0, 7);
+      }
+
+      // If category change provided and not a valid UUID, resolve by name
+      let categoryIdToUse = existing.category_id as string;
+      let categoryNameToUse = existing.category_name as string;
+      if (updates.category_id || updates.category_name) {
+        const resolved = await this.resolveCategoryId(userId, updates.category_id, updates.category_name);
+        if (!resolved) {
+          throw createError('Unknown category. Provide a valid category_id or category_name.', 400);
+        }
+        categoryIdToUse = resolved.id;
+        categoryNameToUse = resolved.name;
+      }
+
+      const { data: updated, error: updateError } = await supabaseAdmin
+        .from('transactions')
+        .update({
+          category_id: categoryIdToUse,
+          category_name: categoryNameToUse,
+          amount: updates.amount ?? existing.amount,
+          description: updates.description ?? existing.description,
+          date: newDate,
+          month,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw createError('Failed to update transaction', 500);
+      }
+
+      return updated as Transaction;
+    } catch (error) {
+      if (error instanceof Error && 'statusCode' in error) {
+        throw error;
+      }
+      console.error('Update transaction error:', error);
+      throw createError('Failed to update transaction', 500);
     }
   }
 

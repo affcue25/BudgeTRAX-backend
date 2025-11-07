@@ -132,6 +132,36 @@ export class BudgetController {
   }
 
   /**
+   * Update a transaction
+   */
+  static async updateTransaction(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const user = (req as any).user;
+      const { transactionId } = req.params;
+      const updates = req.body;
+
+      if (!user) {
+        throw createError('User not found', 404);
+      }
+      if (!transactionId) {
+        throw createError('Transaction ID is required', 400);
+      }
+
+      const transaction = await BudgetService.updateTransaction(user.id, transactionId, updates);
+
+      const response: ApiResponse = {
+        success: true,
+        data: transaction,
+        message: 'Transaction updated successfully'
+      };
+
+      res.status(200).json(response);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Get user's monthly history
    */
   static async getMonthlyHistory(req: Request, res: Response, next: NextFunction): Promise<void> {

@@ -45,6 +45,13 @@ router.get('/transactions', BudgetController.getTransactions);
 router.post('/transactions', validateRequest(budgetSchemas.createTransaction), BudgetController.createTransaction);
 
 /**
+ * @route   PUT /api/budget/transactions/:transactionId
+ * @desc    Update a transaction
+ * @access  Private
+ */
+router.put('/transactions/:transactionId', validateRequest(budgetSchemas.updateTransaction), BudgetController.updateTransaction);
+
+/**
  * @route   GET /api/budget/history
  * @desc    Get user's monthly history
  * @access  Private
